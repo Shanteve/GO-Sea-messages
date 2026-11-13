@@ -1,18 +1,40 @@
 services:
-  bottle-api:
+  backend:
     build:
-      context: .
-    ports:
-      - "8080:8080"
+      context: ./backend
+    expose:
+      - "8080"
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/health"]
       interval: 15s
-      timeout: 5s
+      timeout: 3s
       retries: 3
-      start_interval: 10s
     deploy:
       resources:
         limits:
           cpus: "0.5"
           memory: 128M
+    networks:
+      - app-network
+    
+  frontend:
+    build:
+      context: ./frontend
+    ports:
+      - "3000:80"
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_started
+    deploy:
+      resources:
+        limits:
+          cpus: "0.3"
+          memory: 64M
+    networks:
+      - app-network
+
+networks:
+  app-network:
+    driver: bridge

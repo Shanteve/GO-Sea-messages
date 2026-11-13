@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"log"
 	"net/http"
 	"time"
 	"unicode/utf8"
@@ -113,6 +114,8 @@ func CORSMiddleware(next http.Handler) http.Handler {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
+
+		log.Printf("Ебучий host: %s | url: %s", r.URL.Host, r.URL.Path)
 
 		next.ServeHTTP(w, r)
 	})

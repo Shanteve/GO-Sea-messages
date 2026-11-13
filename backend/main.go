@@ -18,10 +18,10 @@ func main() {
 	h := handlers.NewHandler(ocean)
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/throw", h.ThrowHandler)
-	mux.HandleFunc("/catch", h.CatchHandler)
-	mux.HandleFunc("/status", h.StatsHandler)
-	mux.HandleFunc("/health", h.HealthHandler)
+	mux.HandleFunc("/api/throw", h.ThrowHandler)
+	mux.HandleFunc("/api/catch", h.CatchHandler)
+	mux.HandleFunc("/api/stats", h.StatsHandler)
+	mux.HandleFunc("/api/health", h.HealthHandler)
 
 	handler := handlers.CORSMiddleware(mux)
 
