@@ -10,7 +10,7 @@ type Bottle struct {
 	ID        string    `json:"id"`
 	Message   string    `json:"message"`
 	Author    string    `json:"author"`
-	CreatedAt time.Time `json:"create_at"`
+	CreatedAt time.Time `json:"created_at"`
 	Floating  bool      `json:"floating"`
 }
 

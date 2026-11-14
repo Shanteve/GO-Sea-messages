@@ -1,190 +1,549 @@
-import { useState, useEffect } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import axios from 'axios'
-import { Anchor, Wind, Droplets, Send, MessageCircle, Compass, Clock, Sparkles } from 'lucide-react'
+import {
+  Anchor,
+  CalendarDays,
+  Check,
+  Clock3,
+  Compass,
+  Copy,
+  Droplets,
+  Inbox,
+  LoaderCircle,
+  MessageCircle,
+  Send,
+  Sparkles,
+  UserRound,
+  Waves,
+  Wind,
+  X,
+} from 'lucide-react'
 import './App.css'
+
+const MAX_MESSAGE_LENGTH = 500
+
+function formatDate(value) {
+  if (!value) return 'Дата неизвестна'
+
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return 'Дата неизвестна'
+
+  return new Intl.DateTimeFormat('ru-RU', {
+    day: 'numeric',
+    month: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(date)
+}
+
+function AnimatedNumber({ value }) {
+  const [displayValue, setDisplayValue] = useState(Number(value) || 0)
+  const previousValue = useRef(Number(value) || 0)
+
+  useEffect(() => {
+    const targetValue = Number(value) || 0
+    const startValue = previousValue.current
+    const reduceMotion = window.matchMedia
+      ? window.matchMedia('(prefers-reduced-motion: reduce)').matches
+      : false
+
+    if (reduceMotion || startValue === targetValue) {
+      setDisplayValue(targetValue)
+      previousValue.current = targetValue
+      return undefined
+    }
+
+    const duration = 650
+    const startTime = performance.now()
+    let frameId
+
+    const animate = (currentTime) => {
+      const progress = Math.min((currentTime - startTime) / duration, 1)
+      const easedProgress = 1 - (1 - progress) ** 3
+      const nextValue = Math.round(startValue + (targetValue - startValue) * easedProgress)
+
+      setDisplayValue(nextValue)
+
+      if (progress < 1) {
+        frameId = window.requestAnimationFrame(animate)
+      } else {
+        previousValue.current = targetValue
+      }
+    }
+
+    frameId = window.requestAnimationFrame(animate)
+    return () => window.cancelAnimationFrame(frameId)
+  }, [value])
+
+  return <span>{displayValue.toLocaleString('ru-RU')}</span>
+}
 
 export default function App() {
   const [stats, setStats] = useState({ floating: 0, drifted: 0 })
   const [message, setMessage] = useState('')
   const [author, setAuthor] = useState('')
   const [caughtBottles, setCaughtBottles] = useState([])
-  const [isLoading, setIsLoading] = useState(false)
+  const [loadingAction, setLoadingAction] = useState(null)
   const [notification, setNotification] = useState(null)
+  const [copiedId, setCopiedId] = useState(null)
+  const [revealedBottle, setRevealedBottle] = useState(null)
+  const copyTimerRef = useRef(null)
+  const revealCloseButtonRef = useRef(null)
+
+  const isLoading = loadingAction !== null
 
   useEffect(() => {
+    const controller = new AbortController()
+    let requestInFlight = false
+
     const fetchStats = async () => {
+      if (document.visibilityState !== 'visible' || requestInFlight) return
+
+      requestInFlight = true
       try {
-        const res = await axios.get('/api/stats')
-        setStats(res.data)
+        const res = await axios.get('/api/stats', { signal: controller.signal })
+        if (!controller.signal.aborted) {
+          setStats({
+            floating: Math.max(0, Number(res.data?.floating) || 0),
+            drifted: Math.max(0, Number(res.data?.drifted) || 0),
+          })
+        }
       } catch (err) {
-        console.error("Ошибка статистики", err)
+        if (!controller.signal.aborted) console.error('Ошибка статистики', err)
+      } finally {
+        requestInFlight = false
       }
     }
+
     fetchStats()
-    const interval = setInterval(fetchStats, 3000)
-    return () => clearInterval(interval)
+    const interval = window.setInterval(fetchStats, 10000)
+
+    return () => {
+      window.clearInterval(interval)
+      controller.abort()
+    }
   }, [])
 
+  useEffect(() => {
+    if (!notification) return undefined
+
+    const notificationId = notification.id
+    const leaveTimeout = window.setTimeout(() => {
+      setNotification((current) => (
+        current?.id === notificationId ? { ...current, leaving: true } : current
+      ))
+    }, 2800)
+    const removeTimeout = window.setTimeout(() => {
+      setNotification((current) => (current?.id === notificationId ? null : current))
+    }, 3200)
+
+    return () => {
+      window.clearTimeout(leaveTimeout)
+      window.clearTimeout(removeTimeout)
+    }
+  }, [notification?.id])
+
+  useEffect(() => () => {
+    if (copyTimerRef.current) window.clearTimeout(copyTimerRef.current)
+  }, [])
+
+  // Keep the revealed message focused and prevent the page behind it from scrolling.
+  useEffect(() => {
+    if (!revealedBottle) return undefined
+
+    const previousActiveElement = document.activeElement
+    const previousOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    revealCloseButtonRef.current?.focus()
+
+    const handleKeyDown = (event) => {
+      if (event.key === 'Escape') setRevealedBottle(null)
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => {
+      document.body.style.overflow = previousOverflow
+      window.removeEventListener('keydown', handleKeyDown)
+      if (previousActiveElement instanceof HTMLElement) previousActiveElement.focus()
+    }
+  }, [revealedBottle?.revealKey])
+
   const showNotify = (text, type = 'success') => {
-    setNotification({ text, type })
-    setTimeout(() => setNotification(null), 3000)
+    setNotification({ text, type, id: Date.now() })
   }
 
   const throwBottle = async () => {
+    if (isLoading) return
+
     if (!message.trim()) {
       showNotify('Послание не может быть пустым', 'error')
       return
     }
-    setIsLoading(true)
+
+    setLoadingAction('throw')
     try {
-      await axios.post('/api/throw', { message, author: author || 'Неизвестный мореплаватель' })
+      await axios.post('/api/throw', {
+        message: message.trim(),
+        author: author.trim() || 'Неизвестный мореплаватель',
+      })
       showNotify('Послание унесено течением... 🌊')
       setMessage('')
       setAuthor('')
     } catch (err) {
-      showNotify(err.response?.data?.error || 'Ошибка отправки', 'error')
+      showNotify(err.response?.data?.error || 'Не удалось отправить послание', 'error')
     } finally {
-      setTimeout(() => setIsLoading(false), 500)
+      setLoadingAction(null)
     }
   }
 
   const catchBottle = async () => {
-    setIsLoading(true)
+    if (isLoading) return
+
+    setLoadingAction('catch')
     try {
       const res = await axios.get('/api/catch')
-      setCaughtBottles(prev => [res.data, ...prev])
-      showNotify('Вы поймали послание!', 'success')
-      console.log(res.data.Date)
+      if (res.data && typeof res.data === 'object') {
+        const bottle = res.data
+        setCaughtBottles((prev) => [bottle, ...prev])
+        setRevealedBottle({
+          ...bottle,
+          revealKey: `${bottle.id ?? 'bottle'}-${Date.now()}`,
+        })
+      } else {
+        showNotify('В этом месте океан пуст...', 'info')
+      }
     } catch (err) {
       showNotify(err.response?.data?.message || 'В этом месте океан пуст...', 'info')
     } finally {
-      setTimeout(() => setIsLoading(false), 500)
+      setLoadingAction(null)
+    }
+  }
+
+  const copyMessage = async (text, id) => {
+    try {
+      await navigator.clipboard.writeText(text)
+      setCopiedId(id)
+      showNotify('Текст послания скопирован')
+
+      if (copyTimerRef.current) window.clearTimeout(copyTimerRef.current)
+      copyTimerRef.current = window.setTimeout(() => setCopiedId(null), 1800)
+    } catch {
+      showNotify('Не удалось скопировать текст', 'error')
     }
   }
 
   return (
-    <div className="min-h-screen relative py-8 px-4 sm:px-6">
-      {/* Фоновые декоративные элементы */}
-      <div className="fixed top-20 left-10 w-64 h-64 bg-blue-500 rounded-full mix-blend-screen filter blur-[100px] opacity-10 animate-float"></div>
-      <div className="fixed bottom-20 right-10 w-96 h-96 bg-cyan-500 rounded-full mix-blend-screen filter blur-[120px] opacity-10 animate-float" style={{animationDelay: '2s'}}></div>
+    <main className="app-shell">
+      <div className="ambient-orb ambient-orb--one" aria-hidden="true" />
+      <div className="ambient-orb ambient-orb--two" aria-hidden="true" />
+      <div className="ambient-orb ambient-orb--three" aria-hidden="true" />
 
-      {/* Уведомления */}
       {notification && (
-        <div className={`fixed top-6 left-1/2 -translate-x-1/2 z-50 px-6 py-3 rounded-full glass-panel font-heading font-semibold shadow-2xl animate-float ${
-          notification.type === 'error' ? 'border-red-500/30 text-red-200' : 
-          notification.type === 'info' ? 'border-blue-500/30 text-blue-200' : 'border-green-500/30 text-green-200'
-        }`}>
+        <div
+          key={notification.id}
+          className={`notification notification--${notification.type} ${notification.leaving ? 'notification--leaving' : ''}`}
+          role={notification.type === 'error' ? 'alert' : 'status'}
+          aria-live="polite"
+        >
+          <span className="notification-dot" aria-hidden="true" />
           {notification.text}
         </div>
       )}
 
-      <div className="max-w-2xl mx-auto relative z-10 space-y-6">
-        
-        {/* Заголовок */}
-        <div className="text-center space-y-2 animate-float">
-          <div className="inline-flex items-center justify-center p-3 glass-panel rounded-2xl mb-4">
-            <Compass className="w-8 h-8 text-cyan-400" />
-          </div>
-          <h1 className="text-4xl sm:text-5xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-cyan-300 to-blue-500 drop-shadow-sm">
-            Deep Sea Messages
-          </h1>
-          <p className="text-blue-200/60 text-lg font-light max-w-md mx-auto">
-            Отправь своё послание в океан или поймай чужое.
-          </p>
-        </div>
-
-        {/* Статистика */}
-        <div className="grid grid-cols-2 gap-4">
-          <div className="glass-panel rounded-2xl p-5 flex items-center gap-4 transition-all hover:scale-[1.02]">
-            <div className="p-3 bg-blue-500/10 rounded-xl">
-              <Wind className="w-6 h-6 text-blue-400" />
-            </div>
-            <div>
-              <div className="text-3xl font-bold font-heading text-white">{stats.floating}</div>
-              <div className="text-sm text-blue-200/60">В плавании</div>
-            </div>
-          </div>
-          <div className="glass-panel rounded-2xl p-5 flex items-center gap-4 transition-all hover:scale-[1.02]">
-            <div className="p-3 bg-cyan-500/10 rounded-xl">
-              <Droplets className="w-6 h-6 text-cyan-400" />
-            </div>
-            <div>
-              <div className="text-3xl font-bold font-heading text-white">{stats.drifted}</div>
-              <div className="text-sm text-blue-200/60">Доступно для поимки</div>
-            </div>
-          </div>
-        </div>
-
-        {/* Основная панель действий */}
-        <div className="glass-panel rounded-3xl p-6 sm:p-8 space-y-5">
-          <div className="flex items-center gap-3 mb-2">
-            <Send className="w-5 h-5 text-cyan-400" />
-            <h2 className="text-xl font-bold font-heading text-white">Действия с океаном</h2>
-          </div>
-          
-          <input
-            className="ocean-input w-full px-4 py-3 rounded-xl font-light"
-            placeholder="Кто отправляет? (необязательно)"
-            value={author}
-            onChange={e => setAuthor(e.target.value)}
-          />
-          <textarea
-            className="ocean-input w-full px-4 py-3 rounded-xl font-light resize-none"
-            placeholder="Напиши то, что хочешь доверить океану..."
-            value={message}
-            onChange={e => setMessage(e.target.value)}
-            rows="3"
-          />
-          
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
-            <button 
-              className="ocean-btn py-4 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-bold font-heading rounded-xl shadow-lg shadow-cyan-900/20 flex items-center justify-center gap-2 disabled:opacity-50"
-              onClick={throwBottle}
-              disabled={isLoading}
+      {revealedBottle && (
+        <div
+          className="reveal-overlay"
+          onClick={(event) => {
+            if (event.target === event.currentTarget) setRevealedBottle(null)
+          }}
+        >
+          <section
+            key={revealedBottle.revealKey}
+            className="reveal-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="reveal-title"
+            aria-describedby="reveal-message"
+          >
+            <button
+              ref={revealCloseButtonRef}
+              type="button"
+              className="reveal-close"
+              onClick={() => setRevealedBottle(null)}
+              aria-label="Закрыть послание"
             >
-              {isLoading ? 'Отправляем...' : 'Бросить в океан'}
-              <Anchor className="w-5 h-5" />
+              <X size={19} />
             </button>
 
-            <button 
-              className="ocean-btn py-4 bg-gradient-to-r from-blue-800 to-blue-950 hover:from-blue-700 hover:to-blue-900 text-white font-bold font-heading rounded-xl shadow-lg shadow-blue-900/30 flex items-center justify-center gap-2 disabled:opacity-50 border border-blue-500/20"
-              onClick={catchBottle}
-              disabled={isLoading}
-            >
-              {isLoading ? 'Ищем в глубине...' : 'Поймать послание'}
-              <Sparkles className="w-5 h-5" />
-            </button>
-          </div>
-        </div>
-
-        {/* Список пойманных бутылок */}
-        {caughtBottles.length > 0 && (
-          <div className="space-y-4">
-            <h3 className="text-lg font-bold font-heading text-blue-200/80 flex items-center gap-2 px-2">
-              <Clock className="w-4 h-4" />
-              Ваши находки ({caughtBottles.length})
-            </h3>
-            <div className="space-y-3 max-h-96 overflow-y-auto custom-scroll pr-2">
-              {caughtBottles.map((bottle, index) => (
-                <div key={bottle.id + index} className="glass-panel rounded-2xl p-5 border-l-4 border-l-amber-500/50 animate-float" style={{animationDuration: '5s', animationDelay: `${index * 0.1}s`}}>
-                  <div className="flex justify-between items-start mb-2">
-                    <span className="text-sm font-semibold text-amber-300 font-heading flex items-center gap-2">
-                      <MessageCircle className="w-3 h-3" /> {bottle.author}
-                    </span>
-                    <span className="text-xs text-blue-200/40">
-                      {new Date(bottle.created_at).toLocaleDateString()}
-                    </span>
-                  </div>
-                  <p className="text-blue-100 leading-relaxed font-light italic">
-                    "{bottle.message}"
-                  </p>
+            <div className="reveal-heading">
+              <p className="eyebrow reveal-eyebrow">ТЕЧЕНИЕ ПРИНЕСЛО ТЕБЕ ЧТО-ТО ОСОБЕННОЕ</p>
+              <div className="reveal-bottle-scene" aria-hidden="true">
+                <span className="reveal-bubble reveal-bubble--one" />
+                <span className="reveal-bubble reveal-bubble--two" />
+                <span className="reveal-bubble reveal-bubble--three" />
+                <div className="reveal-bottle">
+                  <span className="reveal-bottle-cork" />
+                  <span className="reveal-bottle-neck" />
+                  <span className="reveal-bottle-body">
+                    <span className="reveal-bottle-label"><Sparkles size={18} /></span>
+                  </span>
+                  <span className="reveal-bottle-shine" />
                 </div>
-              ))}
+                <span className="reveal-bottle-shadow" />
+              </div>
+              <h2 id="reveal-title">Послание нашло тебя</h2>
+              <p className="reveal-subtitle">Незнакомая история проделала долгий путь, чтобы оказаться здесь.</p>
+            </div>
+
+            <article className="revealed-letter">
+              <div className="revealed-letter-top">
+                <div className="revealed-author-avatar" aria-hidden="true">
+                  {(revealedBottle.author || 'Неизвестный мореплаватель').trim().charAt(0).toUpperCase() || 'О'}
+                </div>
+                <div className="revealed-author-details">
+                  <span className="revealed-author">{revealedBottle.author || 'Неизвестный мореплаватель'}</span>
+                  <span className="revealed-date">
+                    <CalendarDays size={13} />
+                    {formatDate(revealedBottle.create_at ?? revealedBottle.created_at)}
+                  </span>
+                </div>
+                <Sparkles className="revealed-letter-sparkle" size={19} aria-hidden="true" />
+              </div>
+              <p id="reveal-message" className="revealed-message">
+                {revealedBottle.message || 'В этой бутылке оказалось пустое послание.'}
+              </p>
+              <div className="revealed-letter-footer">
+                <Waves size={14} />
+                <span>Найдено в глубинах океана</span>
+              </div>
+            </article>
+
+            <div className="reveal-actions">
+              <button
+                type="button"
+                className="reveal-copy-btn"
+                onClick={() => copyMessage(revealedBottle.message || '', revealedBottle.revealKey)}
+              >
+                {copiedId === revealedBottle.revealKey ? <Check size={16} /> : <Copy size={16} />}
+                {copiedId === revealedBottle.revealKey ? 'Скопировано' : 'Копировать текст'}
+              </button>
+              <button
+                type="button"
+                className="ocean-btn ocean-btn--primary reveal-return-btn"
+                onClick={() => setRevealedBottle(null)}
+              >
+                Вернуться к океану <Waves size={18} />
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
+
+      <div className="app-content">
+        <header className="hero">
+          <div className="hero-mark" aria-hidden="true">
+            <Compass size={31} strokeWidth={1.7} />
+            <span className="hero-mark-sparkle"><Sparkles size={13} /></span>
+          </div>
+          <p className="eyebrow">ТВОЯ ИСТОРИЯ В БЕСКРАЙНЕМ ОКЕАНЕ</p>
+          <h1>Deep Sea <span>Messages</span></h1>
+          <p className="hero-description">
+            Отправь своё послание в океан или поймай то, что оставил кто-то другой.
+          </p>
+          <div className="ocean-status">
+            <span className="status-pulse" aria-hidden="true" />
+            Здесь всегда есть место для новой истории
+          </div>
+        </header>
+
+        <section className="stats-grid" aria-label="Статистика океана">
+          <article className="glass-panel stat-card">
+            <div className="stat-icon stat-icon--blue">
+              <Wind size={23} strokeWidth={1.8} />
+            </div>
+            <div className="stat-copy">
+              <span className="stat-label">В плавании</span>
+              <strong className="stat-value"><AnimatedNumber value={stats.floating} /></strong>
+              <span className="stat-caption">посланий покинули берег</span>
+            </div>
+            <Waves className="stat-decoration" size={72} strokeWidth={0.8} aria-hidden="true" />
+          </article>
+
+          <article className="glass-panel stat-card">
+            <div className="stat-icon stat-icon--cyan">
+              <Droplets size={23} strokeWidth={1.8} />
+            </div>
+            <div className="stat-copy">
+              <span className="stat-label">Доступно для поимки</span>
+              <strong className="stat-value"><AnimatedNumber value={stats.drifted} /></strong>
+              <span className="stat-caption">посланий ждут своего читателя</span>
+            </div>
+            <Sparkles className="stat-decoration" size={70} strokeWidth={0.8} aria-hidden="true" />
+          </article>
+        </section>
+
+        <section className="glass-panel action-panel" aria-labelledby="actions-title">
+          <div className="section-heading">
+            <div className="section-icon"><Send size={20} /></div>
+            <div>
+              <p className="eyebrow section-eyebrow">СОЗДАЙ СВОЮ ИСТОРИЮ</p>
+              <h2 id="actions-title">Действия с океаном</h2>
             </div>
           </div>
-        )}
+          <p className="panel-description">
+            Оставь несколько строк незнакомцу или отправься на поиски чужой истории.
+          </p>
 
+          <form
+            className="message-form"
+            onSubmit={(event) => {
+              event.preventDefault()
+              throwBottle()
+            }}
+          >
+            <div className="form-field">
+              <label className="field-label" htmlFor="message-author">Твоё имя <span>необязательно</span></label>
+              <div className="input-wrap">
+                <UserRound className="input-icon" size={18} aria-hidden="true" />
+                <input
+                  id="message-author"
+                  className="ocean-input"
+                  type="text"
+                  placeholder="Как тебя называть?"
+                  value={author}
+                  onChange={(event) => setAuthor(event.target.value)}
+                  maxLength={60}
+                  autoComplete="name"
+                  disabled={isLoading}
+                />
+              </div>
+            </div>
+
+            <div className="form-field">
+              <label className="field-label" htmlFor="message-text">Твоё послание</label>
+              <textarea
+                id="message-text"
+                className="ocean-input ocean-textarea"
+                placeholder="Напиши то, что хочешь доверить океану..."
+                value={message}
+                onChange={(event) => setMessage(event.target.value)}
+                maxLength={MAX_MESSAGE_LENGTH}
+                rows={4}
+                disabled={isLoading}
+              />
+              <div className="textarea-meta">
+                <span className="input-hint">Иногда несколько искренних слов — это целый мир.</span>
+                <span className={`character-count ${message.length >= MAX_MESSAGE_LENGTH ? 'character-count--limit' : ''}`}>
+                  {message.length}/{MAX_MESSAGE_LENGTH}
+                </span>
+              </div>
+            </div>
+
+            <div className="actions-grid">
+              <button
+                type="submit"
+                className="ocean-btn ocean-btn--primary"
+                disabled={isLoading}
+                aria-busy={loadingAction === 'throw'}
+              >
+                {loadingAction === 'throw' ? (
+                  <><LoaderCircle className="loading-icon" size={19} /> Отправляем...</>
+                ) : (
+                  <>Бросить в океан <Anchor size={19} /></>
+                )}
+              </button>
+
+              <button
+                type="button"
+                className="ocean-btn ocean-btn--secondary"
+                onClick={catchBottle}
+                disabled={isLoading}
+                aria-busy={loadingAction === 'catch'}
+              >
+                {loadingAction === 'catch' ? (
+                  <><LoaderCircle className="loading-icon" size={19} /> Ищем в глубине...</>
+                ) : (
+                  <>Поймать послание <Sparkles size={19} /></>
+                )}
+              </button>
+            </div>
+          </form>
+
+          <div className="panel-footer">
+            <Waves size={16} aria-hidden="true" />
+            <span>Каждое послание отправляется в собственное плавание.</span>
+          </div>
+        </section>
+
+        <section className="messages-section" aria-labelledby="messages-title">
+          <div className="messages-heading">
+            <div className="messages-title-wrap">
+              <div className="section-icon section-icon--small"><MessageCircle size={18} /></div>
+              <div>
+                <p className="eyebrow section-eyebrow">СЛУЧАЙНЫЕ ВСТРЕЧИ</p>
+                <h2 id="messages-title">Твои находки <span className="findings-count">{caughtBottles.length}</span></h2>
+              </div>
+            </div>
+            <span className="messages-caption">Послания, которые нашли тебя</span>
+          </div>
+
+          {caughtBottles.length === 0 ? (
+            <div className="glass-panel empty-state">
+              <div className="empty-icon"><Inbox size={29} strokeWidth={1.5} /></div>
+              <h3>Океан пока молчит</h3>
+              <p>Попробуй поймать послание — возможно, кто-то уже оставил историю именно для тебя.</p>
+              <span className="empty-decoration" aria-hidden="true"><Sparkles size={16} /></span>
+            </div>
+          ) : (
+            <div className="message-list" aria-live="polite">
+              {caughtBottles.map((bottle, index) => {
+                // Backend currently returns `create_at`; support `created_at` too.
+                const bottleDate = bottle.create_at ?? bottle.created_at
+                const bottleKey = String(bottle.id ?? `${bottleDate ?? 'message'}-${index}`)
+                const authorName = bottle.author || 'Неизвестный мореплаватель'
+                const initial = authorName.trim().charAt(0).toUpperCase() || 'О'
+
+                return (
+                  <article
+                    key={bottleKey}
+                    className="glass-panel message-card"
+                    style={{ animationDelay: `${Math.min(index, 6) * 55}ms` }}
+                  >
+                    <div className="message-card-top">
+                      <div className="message-author-wrap">
+                        <div className="author-avatar" aria-hidden="true">{initial}</div>
+                        <div className="message-author-details">
+                          <span className="message-author">{authorName}</span>
+                          <span className="message-date"><CalendarDays size={13} /> {formatDate(bottleDate)}</span>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        className="copy-btn"
+                        onClick={() => copyMessage(bottle.message || '', bottleKey)}
+                        aria-label="Скопировать текст послания"
+                        title="Скопировать послание"
+                      >
+                        {copiedId === bottleKey ? <Check size={16} /> : <Copy size={16} />}
+                        <span>{copiedId === bottleKey ? 'Скопировано' : 'Копировать'}</span>
+                      </button>
+                    </div>
+                    <p className="message-text">{bottle.message}</p>
+                    <div className="message-card-footer"><Clock3 size={13} /> Найдено в глубинах океана</div>
+                  </article>
+                )
+              })}
+            </div>
+          )}
+        </section>
+
+        <footer className="app-footer">
+          <span className="footer-wave"><Waves size={17} /></span>
+          <span>Deep Sea Messages</span>
+          <span className="footer-separator">·</span>
+          <span>Истории не знают границ</span>
+        </footer>
       </div>
-    </div>
+    </main>
   )
 }
