@@ -9,7 +9,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/shanteve/go-bottle-api/models"
+	"github.com/shanteve/go-bottle-api/internal/models"
 )
 
 type Handler struct {

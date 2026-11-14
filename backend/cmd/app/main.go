@@ -9,8 +9,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/shanteve/go-bottle-api/handlers"
-	"github.com/shanteve/go-bottle-api/models"
+	"github.com/shanteve/go-bottle-api/internal/handlers"
+	"github.com/shanteve/go-bottle-api/internal/models"
 )
 
 func main() {
