@@ -105,8 +105,7 @@ func (h *Handler) HealthHandler(w http.ResponseWriter, r *http.Request) {
 
 func CORSMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// * в origin только для разработки
-		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Origin", "https://deepsea.shanteve.tech")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
 
@@ -115,7 +114,7 @@ func CORSMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
-		log.Printf("Ебучий host: %s | url: %s", r.URL.Host, r.URL.Path)
+		log.Printf("Host: %s | url: %s ", r.Host, r.URL.Path)
 
 		next.ServeHTTP(w, r)
 	})
