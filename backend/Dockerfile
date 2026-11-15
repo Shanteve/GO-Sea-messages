@@ -7,8 +7,8 @@ RUN go mod download && go mod verify
 
 COPY . .
 
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=arm64 \
-    go build -o bottle-api ./cmd/app/
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} \
+    go build -ldflags="-s -w" -o bottle-api ./cmd/app/
 
 FROM alpine:3.24
 
