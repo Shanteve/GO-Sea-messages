@@ -6,7 +6,7 @@
 [![Prometheus](https://img.shields.io/badge/Metrics-Prometheus-E6522C?style=flat&logo=prometheus)](https://prometheus.io/)
 
 Production-ready API для имитации отложенной доставки сообщений (Delayed Queue), построенный с упором на DevOps best practices, наблюдаемость (observability) и отказоустойчивость.
-
+![alt text](images/image.png)
 ## 🎯 О проекте
 Это не просто "игра", а инфраструктурный полигон. Проект демонстрирует, как должен выглядеть современный микросервис:
 - **Безопасность:** Бэкенд полностью скрыт за Nginx Reverse Proxy. Пользователь не имеет прямого доступа к Go-порту.
