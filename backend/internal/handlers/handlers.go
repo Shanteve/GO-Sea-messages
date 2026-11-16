@@ -43,8 +43,8 @@ func (h *Handler) ThrowHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if utf8.RuneCountInString(req.Message) > 200 {
-		http.Error(w, "Message cannot be longer than 200 chars", http.StatusBadRequest)
+	if utf8.RuneCountInString(req.Message) > 800 {
+		http.Error(w, "Message cannot be longer than 800 chars", http.StatusBadRequest)
 		return
 	}
 
